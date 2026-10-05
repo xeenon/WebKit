@@ -1093,6 +1093,19 @@ private:
     Vector<JSC::Strong<JSC::Unknown>> m_jsValues;
 };
 
+static bool isEmptyImmutableContainer(const ObjcContainerConvertor::Task& task)
+{
+    switch (task.type) {
+    case ContainerArray:
+        return ![checked_objc_cast<NSArray>(task.objc) count] && !is_objc<NSMutableArray>(task.objc);
+    case ContainerDictionary:
+        return ![checked_objc_cast<NSDictionary>(task.objc) count] && !is_objc<NSMutableDictionary>(task.objc);
+    case ContainerNone:
+        break;
+    }
+    return false;
+}
+
 JSValueRef ObjcContainerConvertor::convert(id object)
 {
     ASSERT(object);
@@ -1102,6 +1115,16 @@ JSValueRef ObjcContainerConvertor::convert(id object)
         return audit(it->value);
 
     ObjcContainerConvertor::Task task = objectToValueWithoutCopy(m_context, object);
+
+    // Empty immutable NSArray and NSDictionary instances are often shared singletons (e.g. from NSJSONSerialization).
+    // They can't be part of a cycle and have nothing to fill in, so don't track them by identity, otherwise
+    // distinct empty containers in the graph would alias a single JS object.
+    if (isEmptyImmutableContainer(task)) {
+        JSC::JSGlobalObject* globalObject = toJS(m_context.JSGlobalContextRef);
+        m_jsValues.append(JSC::Strong<JSC::Unknown>(globalObject->vm(), toJSForGC(globalObject, task.js)));
+        return audit(task.js);
+    }
+
     add(task);
     return audit(task.js);
 }

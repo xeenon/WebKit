@@ -2911,6 +2911,39 @@ static void testToString()
     }
 }
 
+static void testEmptyContainersDoNotAlias()
+{
+    @autoreleasepool {
+        JSContext *context = [[JSContext alloc] init];
+
+        // Empty NSArray and NSDictionary instances are typically shared singletons, but each should convert to a distinct JS object.
+        context[@"value"] = @{ @"firstArray": @[], @"secondArray": @[], @"firstObject": @{ }, @"secondObject": @{ } };
+        checkResult(@"Distinct empty arrays should convert to distinct JS arrays", [[context evaluateScript:@"value.firstArray !== value.secondArray"] toBool]);
+        checkResult(@"Distinct empty dictionaries should convert to distinct JS objects", [[context evaluateScript:@"value.firstObject !== value.secondObject"] toBool]);
+
+        context[@"nested"] = @[ @[], @[ @[] ], @{ } ];
+        checkResult(@"Nested empty arrays should convert to distinct JS arrays", [[context evaluateScript:@"nested[0] !== nested[1][0]"] toBool]);
+
+        [context evaluateScript:@"value.firstArray.push(1); value.firstObject.key = 1;"];
+        checkResult(@"Mutating one empty array should not affect another", [[context evaluateScript:@"value.secondArray.length === 0"] toBool]);
+        checkResult(@"Mutating one empty object should not affect another", [[context evaluateScript:@"!('key' in value.secondObject)"] toBool]);
+
+        // Sharing a non-empty container should still preserve identity.
+        NSArray *shared = @[ @1 ];
+        context[@"sharedValue"] = @[ shared, shared ];
+        checkResult(@"A shared non-empty array should still convert to the same JS array", [[context evaluateScript:@"sharedValue[0] === sharedValue[1]"] toBool]);
+
+        // Sharing an empty mutable container is intentional, so it should preserve identity too.
+        NSMutableArray *sharedMutable = [NSMutableArray array];
+        context[@"sharedMutableValue"] = @[ sharedMutable, sharedMutable ];
+        checkResult(@"A shared empty mutable array should convert to the same JS array", [[context evaluateScript:@"sharedMutableValue[0] === sharedMutableValue[1]"] toBool]);
+
+        NSMutableDictionary *sharedMutableDictionary = [NSMutableDictionary dictionary];
+        context[@"sharedMutableDictionaryValue"] = @[ sharedMutableDictionary, sharedMutableDictionary ];
+        checkResult(@"A shared empty mutable dictionary should convert to the same JS object", [[context evaluateScript:@"sharedMutableDictionaryValue[0] === sharedMutableDictionaryValue[1]"] toBool]);
+    }
+}
+
 static void testBigIntAPI()
 {
     @autoreleasepool {
@@ -3033,6 +3066,7 @@ void testObjectiveCAPI(const char* filter)
     RUN(runJITThreadLimitTests());
     RUN(testToString());
     RUN(testBigIntAPI());
+    RUN(testEmptyContainersDoNotAlias());
 
     RUN(testLoaderResolvesAbsoluteScriptURL());
     RUN(testFetch());
